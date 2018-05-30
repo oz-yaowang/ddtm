@@ -37,7 +37,7 @@ Parameters:
     Description: >
       Optional - Specifies the Comma separated list of existing VPC Subnet
       Ids where ECS instances will run
-    Default: "vpc-0dd503eafd092aaae,vpc-0dd503eafd092aaae"
+    Default: "subnet-0ace281958038a9d7,subnet-09d2c637c29e52213"
   InternalSecurityGroupId:
     Type: String
     Description: >
