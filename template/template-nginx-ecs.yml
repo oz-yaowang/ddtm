@@ -1,0 +1,281 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  create nginx esc cluster and running the EC2 instances
+Parameters:
+  EcsClusterName:
+    Type: String
+    Description: >
+      Specifies the ECS Cluster Name with which the resources would be
+      associated
+    Default: 'nginx'
+  EcsInstanceType:
+    Type: CommaDelimitedList
+    Description: >
+      Specifies the EC2 instance type for your container instances.
+      Defaults to t2.large
+    Default: t2.large
+    ConstraintDescription: must be a valid EC2 instance type.
+  KeyName:
+    Type: String
+    Description: >
+      Optional - Specifies the name of an existing Amazon EC2 key pair
+      to enable SSH access to the EC2 instances in your cluster.
+    Default: 'ecs-ssh-key'
+  VpcId:
+    Type: String
+    Description: >
+      Optional - Specifies the ID of an existing VPC in which to launch
+      your container instances. If you specify a VPC ID, you must specify a list of
+      existing subnets in that VPC. If you do not specify a VPC ID, a new VPC is created
+      with atleast 1 subnet.
+    Default: 'vpc-0dd503eafd092aaae'
+    ConstraintDescription: >
+      VPC Id must begin with 'vpc-'
+  SubnetIds:
+#    Type: CommaDelimitedList
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >
+      Optional - Specifies the Comma separated list of existing VPC Subnet
+      Ids where ECS instances will run
+    Default: "vpc-0dd503eafd092aaae,vpc-0dd503eafd092aaae"
+  InternalSecurityGroupId:
+    Type: String
+    Description: >
+      Internal security group id
+    Default: 'sg-0716314b3048f0664'
+  AsgMinSize:
+    Type: Number
+    Default: '2'
+  AsgMaxSize:
+    Type: Number
+    Description: >
+      Specifies the number of instances to launch and register to the cluster.
+      Defaults to 6.
+    Default: '6'
+  EbsVolumeSize:
+    Type: Number
+    Description: >
+      Optional - Specifies the Size in GBs, of the newly created Amazon
+      Elastic Block Store (Amazon EBS) volume
+    Default: '22'
+  EbsVolumeType:
+    Type: String
+    Description: Optional - Specifies the Type of (Amazon EBS) volume
+    Default: 'gp2'
+    AllowedValues:
+      - ''
+      - standard
+      - io1
+      - gp2
+      - sc1
+      - st1
+    ConstraintDescription: Must be a valid EC2 volume type.
+  DeviceName:
+    Type: String
+    Description: Optional - Specifies the device mapping for the Volume
+    Default: /dev/xvdcz
+  LBListenerPort:
+     Type: Number
+     Default: 80
+  ServiceName:
+    Type: String
+    Default: nginx-service
+  InternetTargetGroup:
+    Type: String
+    Description: internet elb target group arn
+    Default: arn:aws-cn:elasticloadbalancing:cn-north-1:280860046437:targetgroup/arvin-destination-group1/cafadf8cff2a1177
+  CPort:
+    Type: Number
+    Default: 80
+  CName:
+    Type: String
+    Default: arvin-nginx
+  EcrURI:
+    Type: String
+    Default: 280860046437.dkr.ecr.cn-north-1.amazonaws.com.cn
+  BuildTag:
+    Type: String
+    Default: 2018-06-01
+  DesiredCount:
+    Type: Number
+    Default: 1
+Conditions:
+  CreateEC2LCWithKeyPair:
+    !Not [!Equals [!Ref KeyName, '']]
+Mappings:
+  AWSRegionToAMI:
+    ap-south-1:
+      AMI: ami-00491f6f
+    eu-west-3:
+      AMI: ami-9aef59e7
+    eu-west-2:
+      AMI: ami-67cbd003
+    eu-west-1:
+      AMI: ami-1d46df64
+    ap-northeast-2:
+      AMI: ami-c212b2ac
+    ap-northeast-1:
+      AMI: ami-872c4ae1
+    sa-east-1:
+      AMI: ami-af521fc3
+    ca-central-1:
+      AMI: ami-435bde27
+    ap-southeast-1:
+      AMI: ami-910d72ed
+    ap-southeast-2:
+      AMI: ami-58bb443a
+    eu-central-1:
+      AMI: ami-509a053f
+    us-east-1:
+      AMI: ami-28456852
+    us-east-2:
+      AMI: ami-ce1c36ab
+    us-west-1:
+      AMI: ami-74262414
+    us-west-2:
+      AMI: ami-decc7fa6
+    cn-north-1:
+      AMI: ami-9be43bf6
+#-----
+Resources:
+  Cluster:
+      Type: AWS::ECS::Cluster
+      Properties:
+        ClusterName: !Ref EcsClusterName
+  EcsInstanceLc:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !FindInMap [ AWSRegionToAMI, !Ref "AWS::Region", AMI ]
+      InstanceType: !Select [ 0, !Ref EcsInstanceType ]
+      AssociatePublicIpAddress: true
+      IamInstanceProfile: !Ref EcsInstanceProfile
+      KeyName: !If [ CreateEC2LCWithKeyPair, !Ref KeyName, !Ref "AWS::NoValue" ]
+      SecurityGroups:
+        - !Ref InternalSecurityGroupId
+      BlockDeviceMappings:
+      - DeviceName: !Ref DeviceName
+        Ebs:
+         VolumeSize: !Ref EbsVolumeSize
+         VolumeType: !Ref EbsVolumeType
+      UserData:
+        Fn::Base64:
+           !Sub |
+               #!/bin/bash
+               echo "ECS_CLUSTER=${EcsClusterName}" >> /etc/ecs/ecs.config
+
+  IamInstanceRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        Path: /
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            -
+              Action: 'sts:AssumeRole'
+              Effect: Allow
+              Principal:
+                Service: ec2.amazonaws.com.cn
+        ManagedPolicyArns:
+           - arn:aws-cn:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+           - arn:aws-cn:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
+  EcsInstanceProfile:
+   Type: "AWS::IAM::InstanceProfile"
+   Properties:
+     Path: /
+     Roles:
+       - !Ref IamInstanceRole
+     InstanceProfileName: Ec2InstanceProfileNginx
+
+  EcsInstanceAsg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: Cluster
+    Properties:
+      AutoScalingGroupName: !Sub ${EcsClusterName}-EcsInstanceAsg
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchConfigurationName: !Ref EcsInstanceLc
+      MinSize: !Ref AsgMinSize
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgMinSize
+      Tags:
+        -
+          Key: Name
+          Value: !Sub "ECS Instance - ${AWS::StackName}"
+          PropagateAtLaunch: 'true'
+
+
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}'
+
+  NginxECSService:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      ServiceName: !Sub ${ServiceName}
+      Cluster: !Ref EcsClusterName
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: EC2
+      LoadBalancers:
+        - ContainerName: !Ref CName
+          ContainerPort: !Ref CPort
+          TargetGroupArn: !Ref InternetTargetGroup
+  TaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Ref ServiceName
+      RequiresCompatibilities:
+             - EC2
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: !Ref CName
+          Image: !Sub ${EcrURI}/${CName}:${BuildTag}
+          Essential: true
+          Memory: 128
+          Cpu: 128
+          PortMappings:
+            - ContainerPort: !Ref CPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: !Ref 'AWS::StackName'
+  ScalableTarget:
+    DependsOn: NginxECSService
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 1
+      ResourceId: !Sub service/${EcsClusterName}/${ServiceName}
+      RoleARN: arn:aws-cn:iam::280860046437:role/ecsAutoscaleRole
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+  ScalingPolicyByCPU:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: AutoScalingByCPUUsage
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 200
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+
+  ScalingPolicyByMemory:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: AutoScalingByMemoryUsage
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 200
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization

@@ -1,0 +1,528 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  create subsystem esc cluster and running the EC2 instances
+Parameters:
+  StageName:
+    Type: String
+    Default: PROD
+    AllowedValues:
+      - UAT
+      - PROD
+      - QA
+  EcsClusterName:
+    Type: String
+    Description: >
+      Specifies the ECS Cluster Name with which the resources would be
+      associated
+    Default: DDTM
+  EcsInstanceType:
+    Type: CommaDelimitedList
+    Description: >
+      Specifies the EC2 instance type for your container instances.
+      Defaults to t2.large
+    Default: t2.large
+    ConstraintDescription: must be a valid EC2 instance type.
+  KeyName:
+    Type: String
+    Description: >
+      Optional - Specifies the name of an existing Amazon EC2 key pair
+      to enable SSH access to the EC2 instances in your cluster.
+    Default: 'ecs-ssh-key'
+  VpcId:
+    Type: String
+    Description: >
+      Optional - Specifies the ID of an existing VPC in which to launch
+      your container instances. If you specify a VPC ID, you must specify a list of
+      existing subnets in that VPC. If you do not specify a VPC ID, a new VPC is created
+      with atleast 1 subnet.
+    Default: 'vpc-0dd503eafd092aaae'
+    ConstraintDescription: >
+      VPC Id must begin with 'vpc-'
+  SubnetIds:
+#    Type: CommaDelimitedList
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >
+      Optional - Specifies the Comma separated list of existing VPC Subnet
+      Ids where ECS instances will run
+    Default: "vpc-0dd503eafd092aaae,vpc-0dd503eafd092aaae"
+  InternalSecurityGroupId:
+    Type: String
+    Description: >
+      Internal security group id
+    Default: 'sg-0716314b3048f0664'
+  AsgMinSize:
+    Type: Number
+    Default: '2'
+  AsgMaxSize:
+    Type: Number
+    Description: >
+      Specifies the number of instances to launch and register to the cluster.
+      Defaults to 6.
+    Default: '6'
+  EbsVolumeSize:
+    Type: Number
+    Description: >
+      Optional - Specifies the Size in GBs, of the newly created Amazon
+      Elastic Block Store (Amazon EBS) volume
+    Default: '22'
+  EbsVolumeType:
+    Type: String
+    Description: Optional - Specifies the Type of (Amazon EBS) volume
+    Default: 'gp2'
+    AllowedValues:
+      - ''
+      - standard
+      - io1
+      - gp2
+      - sc1
+      - st1
+    ConstraintDescription: Must be a valid EC2 volume type.
+  DeviceName:
+    Type: String
+    Description: Optional - Specifies the device mapping for the Volume
+    Default: /dev/xvdcz
+  LBListenerPort:
+   Type: Number
+   Default: 80
+
+
+
+  UserServiceName:
+    Type: String
+    Default: user-service
+  UserContainerPort:
+    Type: Number
+    Default: 8882
+  UserContainerName:
+    Type: String
+    Default: arvin-user
+  UserEcrURI:
+    Type: String
+    Default: 280860046437.dkr.ecr.cn-north-1.amazonaws.com.cn
+  UserBuildTag:
+    Type: String
+    Default: 2018-06-01
+  UserDesiredCount:
+    Type: Number
+    Default: 1
+
+  PaymentServiceName:
+    Type: String
+    Default: payment-service
+  PaymentContainerPort:
+    Type: Number
+    Default: 8881
+  PaymentContainerName:
+    Type: String
+    Default: arvin-payment
+  PaymentEcrURI:
+    Type: String
+    Default: 280860046437.dkr.ecr.cn-north-1.amazonaws.com.cn
+  PaymentBuildTag:
+    Type: String
+    Default: latest
+  PaymentDesiredCount:
+    Type: Number
+    Default: 1
+
+
+Conditions:
+  CreateEC2LCWithKeyPair:
+    !Not [!Equals [!Ref KeyName, '']]
+Mappings:
+  AWSRegionToAMI:
+    ap-south-1:
+      AMI: ami-00491f6f
+    eu-west-3:
+      AMI: ami-9aef59e7
+    eu-west-2:
+      AMI: ami-67cbd003
+    eu-west-1:
+      AMI: ami-1d46df64
+    ap-northeast-2:
+      AMI: ami-c212b2ac
+    ap-northeast-1:
+      AMI: ami-872c4ae1
+    sa-east-1:
+      AMI: ami-af521fc3
+    ca-central-1:
+      AMI: ami-435bde27
+    ap-southeast-1:
+      AMI: ami-910d72ed
+    ap-southeast-2:
+      AMI: ami-58bb443a
+    eu-central-1:
+      AMI: ami-509a053f
+    us-east-1:
+      AMI: ami-28456852
+    us-east-2:
+      AMI: ami-ce1c36ab
+    us-west-1:
+      AMI: ami-74262414
+    us-west-2:
+      AMI: ami-decc7fa6
+    cn-north-1:
+      AMI: ami-9be43bf6
+#-----
+Resources:
+
+
+#--------------ECS Cluster config ----------------#
+
+  Cluster:
+      Type: AWS::ECS::Cluster
+      Properties:
+        ClusterName: !Sub ${EcsClusterName}-${StageName}
+  EcsInstanceLc:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      ImageId: !FindInMap [ AWSRegionToAMI, !Ref "AWS::Region", AMI ]
+      InstanceType: !Select [ 0, !Ref EcsInstanceType ]
+      AssociatePublicIpAddress: true
+      IamInstanceProfile: !Ref EcsInstanceProfile
+      KeyName: !If [ CreateEC2LCWithKeyPair, !Ref KeyName, !Ref "AWS::NoValue" ]
+      SecurityGroups:
+        - !Ref InternalSecurityGroupId
+      BlockDeviceMappings:
+      - DeviceName: !Ref DeviceName
+        Ebs:
+         VolumeSize: !Ref EbsVolumeSize
+         VolumeType: !Ref EbsVolumeType
+      UserData:
+        Fn::Base64:
+           !Sub |
+               #!/bin/bash
+               echo "ECS_CLUSTER=${EcsClusterName}-${StageName}" >> /etc/ecs/ecs.config
+
+  IamInstanceRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        Path: /
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            -
+              Action: 'sts:AssumeRole'
+              Effect: Allow
+              Principal:
+                Service: ec2.amazonaws.com.cn
+        ManagedPolicyArns:
+           - arn:aws-cn:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+           - arn:aws-cn:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+
+  EcsInstanceProfile:
+   Type: "AWS::IAM::InstanceProfile"
+   Properties:
+     Path: /
+     Roles:
+       - !Ref IamInstanceRole
+     InstanceProfileName: Ec2InstanceProfileDDTM
+
+  EcsInstanceAsg:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn: Cluster
+    Properties:
+      AutoScalingGroupName: !Sub ${EcsClusterName}-${StageName}-EcsInstanceAsg
+      VPCZoneIdentifier: !Ref SubnetIds
+      LaunchConfigurationName: !Ref EcsInstanceLc
+      MinSize: !Ref AsgMinSize
+      MaxSize: !Ref AsgMaxSize
+      DesiredCapacity: !Ref AsgMinSize
+      Tags:
+        -
+          Key: Name
+          Value: !Sub "ECS Instance - ${AWS::StackName}"
+          PropagateAtLaunch: 'true'
+        -
+          Key: Stage
+          Value: !Ref StageName
+          PropagateAtLaunch: 'true'
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub '/ecs/${AWS::StackName}'
+
+
+#-----------------internal ELB config --------------#
+  LoadBalancerInternal:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Tags:
+        -
+          Key: Stage
+          Value: !Ref StageName
+      Name: !Sub ${EcsClusterName}-${StageName}-internal
+      Subnets: !Ref SubnetIds
+      Scheme: internal
+      SecurityGroups:
+          - !Ref InternalSecurityGroupId
+
+  LoadBalancerListenerInternal:
+    DependsOn: LoadBalancerInternal
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancerInternal
+      Port: !Ref LBListenerPort
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupInternalDefault
+
+  TargetGroupInternalDefault:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Tags:
+        -
+          Key: Stage
+          Value: !Ref StageName
+      Name: !Sub ${EcsClusterName}-${StageName}-internal-df-tg
+      VpcId: !Ref VpcId
+      Port: !Ref LBListenerPort
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: instance
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+
+  ListenerRuleUser:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: TargetGroupUser
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "/user/*"
+      ListenerArn:
+        Ref: LoadBalancerListenerInternal
+      Priority: 1
+
+  ListenerRulePayment:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: TargetGroupPayment
+      Conditions:
+      - Field: path-pattern
+        Values:
+        - "/payment/*"
+      ListenerArn:
+        Ref: LoadBalancerListenerInternal
+      Priority: 2
+
+  TargetGroupPayment:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: LoadBalancerInternal
+    Properties:
+      Tags:
+        -
+          Key: Stage
+          Value: !Ref StageName
+      Name: !Sub ${EcsClusterName}-${StageName}-ddtm-payment-tg
+      VpcId: !Ref VpcId
+      Port: !Ref LBListenerPort
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      TargetType: instance
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+
+  TargetGroupUser:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: LoadBalancerInternal
+    Properties:
+      Tags:
+        -
+          Key: Stage
+          Value: !Ref StageName
+      Name: !Sub ${EcsClusterName}-${StageName}-ddtm-user-tg
+      VpcId: !Ref VpcId
+      Port: !Ref LBListenerPort
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      TargetType: instance
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+
+
+
+
+
+
+
+
+#----------- ECS User Service config ---------------#
+
+
+  UserECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub ${UserServiceName}
+      Cluster: !Sub ${EcsClusterName}-${StageName}
+      DesiredCount: !Ref UserDesiredCount
+      TaskDefinition: !Ref UserTaskDefinition
+      LaunchType: EC2
+      LoadBalancers:
+        - ContainerName: !Ref UserContainerName
+          ContainerPort: !Ref UserContainerPort
+          TargetGroupArn: !Ref TargetGroupUser
+  UserTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref UserServiceName
+      RequiresCompatibilities:
+             - EC2
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: !Ref UserContainerName
+          Image: !Sub ${UserEcrURI}/${UserContainerName}:${UserBuildTag}
+          Essential: true
+          Memory: 512
+          Cpu: 512
+          PortMappings:
+            - ContainerPort: !Ref UserContainerPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: !Ref 'AWS::StackName'
+  UserScalableTarget:
+    DependsOn: UserECSService
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 1
+      ResourceId: !Sub service/${EcsClusterName}-${StageName}/${UserServiceName}
+      RoleARN: arn:aws-cn:iam::280860046437:role/ecsAutoscaleRole
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+  ScalingPolicyByCPU:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: AutoScalingByCPUUsage
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref UserScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 200
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+
+  ScalingPolicyByMemory:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: AutoScalingByMemoryUsage
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref UserScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 200
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
+
+
+
+#----------- ECS Payment Service config ---------------#
+
+  PaymentECSService:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      ServiceName: !Sub ${PaymentServiceName}
+      Cluster: !Sub ${EcsClusterName}-${StageName}
+      DesiredCount: !Ref PaymentDesiredCount
+      TaskDefinition: !Ref PaymentTaskDefinition
+      LaunchType: EC2
+      LoadBalancers:
+        - ContainerName: !Ref PaymentContainerName
+          ContainerPort: !Ref PaymentContainerPort
+          TargetGroupArn: !Ref TargetGroupPayment
+  PaymentTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: !Ref PaymentServiceName
+      RequiresCompatibilities:
+             - EC2
+      NetworkMode: bridge
+      ContainerDefinitions:
+        - Name: !Ref PaymentContainerName
+          Image: !Sub ${PaymentEcrURI}/${PaymentContainerName}:${PaymentBuildTag}
+          Essential: true
+          Memory: 512
+          Cpu: 512
+          PortMappings:
+            - ContainerPort: !Ref PaymentContainerPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: !Ref 'AWS::StackName'
+  PaymentScalableTarget:
+    DependsOn: PaymentECSService
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 4
+      MinCapacity: 1
+      ResourceId: !Sub service/${EcsClusterName}-${StageName}/${PaymentServiceName}
+      RoleARN: arn:aws-cn:iam::280860046437:role/ecsAutoscaleRole
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+  ScalingPolicyByCPU:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: AutoScalingByCPUUsage
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref PaymentScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 200
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+
+  ScalingPolicyByMemory:
+    Type: "AWS::ApplicationAutoScaling::ScalingPolicy"
+    Properties:
+      PolicyName: AutoScalingByMemoryUsage
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref PaymentScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 200
+        DisableScaleIn: false
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageMemoryUtilization
