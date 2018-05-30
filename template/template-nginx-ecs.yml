@@ -7,7 +7,14 @@ Parameters:
     Description: >
       Specifies the ECS Cluster Name with which the resources would be
       associated
-    Default: 'nginx'
+    Default: DDTM-NGINX
+  StageName:
+    Type: String
+    Default: PROD
+    AllowedValues:
+      - UAT
+      - PROD
+      - QA
   EcsInstanceType:
     Type: CommaDelimitedList
     Description: >
@@ -141,7 +148,7 @@ Resources:
   Cluster:
       Type: AWS::ECS::Cluster
       Properties:
-        ClusterName: !Ref EcsClusterName
+        ClusterName: !Sub ${EcsClusterName}-${StageName}
   EcsInstanceLc:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -161,7 +168,7 @@ Resources:
         Fn::Base64:
            !Sub |
                #!/bin/bash
-               echo "ECS_CLUSTER=${EcsClusterName}" >> /etc/ecs/ecs.config
+               echo "ECS_CLUSTER=${EcsClusterName}-${StageName}" >> /etc/ecs/ecs.config
 
   IamInstanceRole:
       Type: 'AWS::IAM::Role'
@@ -191,7 +198,7 @@ Resources:
     Type: AWS::AutoScaling::AutoScalingGroup
     DependsOn: Cluster
     Properties:
-      AutoScalingGroupName: !Sub ${EcsClusterName}-EcsInstanceAsg
+      AutoScalingGroupName: !Sub ${EcsClusterName}-${StageName}-EcsInstanceAsg
       VPCZoneIdentifier: !Ref SubnetIds
       LaunchConfigurationName: !Ref EcsInstanceLc
       MinSize: !Ref AsgMinSize
@@ -202,7 +209,10 @@ Resources:
           Key: Name
           Value: !Sub "ECS Instance - ${AWS::StackName}"
           PropagateAtLaunch: 'true'
-
+        -
+          Key: Stage
+          Value: !Ref StageName
+          PropagateAtLaunch: 'true'
 
   LogGroup:
     Type: 'AWS::Logs::LogGroup'
@@ -213,7 +223,7 @@ Resources:
     Type: 'AWS::ECS::Service'
     Properties:
       ServiceName: !Sub ${ServiceName}
-      Cluster: !Ref EcsClusterName
+      Cluster: !GetAtt Cluster.Arn
       DesiredCount: !Ref DesiredCount
       TaskDefinition: !Ref TaskDefinition
       LaunchType: EC2
@@ -248,7 +258,7 @@ Resources:
     Properties:
       MaxCapacity: 4
       MinCapacity: 1
-      ResourceId: !Sub service/${EcsClusterName}/${ServiceName}
+      ResourceId: !Sub service/${EcsClusterName}-${StageName}/${ServiceName}
       RoleARN: arn:aws-cn:iam::280860046437:role/ecsAutoscaleRole
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs

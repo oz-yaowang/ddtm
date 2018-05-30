@@ -385,7 +385,7 @@ Resources:
     Type: AWS::ECS::Service
     Properties:
       ServiceName: !Sub ${UserServiceName}
-      Cluster: !Sub ${EcsClusterName}-${StageName}
+      Cluster: !GetAtt Cluster.Arn
       DesiredCount: !Ref UserDesiredCount
       TaskDefinition: !Ref UserTaskDefinition
       LaunchType: EC2
@@ -460,7 +460,7 @@ Resources:
     Type: 'AWS::ECS::Service'
     Properties:
       ServiceName: !Sub ${PaymentServiceName}
-      Cluster: !Sub ${EcsClusterName}-${StageName}
+      Cluster: !GetAtt Cluster.Arn
       DesiredCount: !Ref PaymentDesiredCount
       TaskDefinition: !Ref PaymentTaskDefinition
       LaunchType: EC2
