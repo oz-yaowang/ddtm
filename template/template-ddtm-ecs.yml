@@ -173,6 +173,7 @@ Resources:
       Type: AWS::ECS::Cluster
       Properties:
         ClusterName: !Sub ${EcsClusterName}-${StageName}
+  #创建EC2实例
   EcsInstanceLc:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
@@ -188,6 +189,7 @@ Resources:
         Ebs:
          VolumeSize: !Ref EbsVolumeSize
          VolumeType: !Ref EbsVolumeType
+      #将EC2向ECS集群注册
       UserData:
         Fn::Base64:
            !Sub |
@@ -216,7 +218,7 @@ Resources:
      Path: /
      Roles:
        - !Ref IamInstanceRole
-     InstanceProfileName: Ec2InstanceProfileDDTM
+     InstanceProfileName: Ec2InstanceProfileDDTM #每个ECS集群profilename必须唯一
 
   EcsInstanceAsg:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -305,6 +307,7 @@ Resources:
       ListenerArn:
         Ref: LoadBalancerListenerInternal
       Priority: 1
+      #同一个侦听器下面的转发规则,priority必须唯一
 
   ListenerRulePayment:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -320,6 +323,7 @@ Resources:
       ListenerArn:
         Ref: LoadBalancerListenerInternal
       Priority: 2
+      #同一个侦听器下面的转发规则,priority必须唯一
 
   TargetGroupPayment:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup

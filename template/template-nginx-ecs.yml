@@ -164,6 +164,7 @@ Resources:
         Ebs:
          VolumeSize: !Ref EbsVolumeSize
          VolumeType: !Ref EbsVolumeType
+      #将EC2向ECS集群注册
       UserData:
         Fn::Base64:
            !Sub |
@@ -192,7 +193,7 @@ Resources:
      Path: /
      Roles:
        - !Ref IamInstanceRole
-     InstanceProfileName: Ec2InstanceProfileNginx
+     InstanceProfileName: Ec2InstanceProfileNginx  #每个ECS集群profilename必须唯一
 
   EcsInstanceAsg:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -214,6 +215,7 @@ Resources:
           Value: !Ref StageName
           PropagateAtLaunch: 'true'
 
+  #可以在CloudWatch /ecs/${stackName}路径下查看容器日志
   LogGroup:
     Type: 'AWS::Logs::LogGroup'
     Properties:
@@ -230,6 +232,7 @@ Resources:
       LoadBalancers:
         - ContainerName: !Ref CName
           ContainerPort: !Ref CPort
+          #外部ELB的目标组，需要预先创建好
           TargetGroupArn: !Ref InternetTargetGroup
   TaskDefinition:
     Type: 'AWS::ECS::TaskDefinition'
